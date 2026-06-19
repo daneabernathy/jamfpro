@@ -20,21 +20,14 @@ PRINTER_SUFFIXES=(
     "_pcd"
 )
 
-# Known PaperCut Print Deploy app locations
+# Known PaperCut Print Deploy app location
 PRINT_DEPLOY_APP="/Applications/PaperCut Print Deploy Client"
-PRINT_DEPLOY_FOLDER="/Applications/PaperCut Print Deploy"
 
-# Uninstall script candidates (tries each in order, stops at first found)
-UNINSTALL_CANDIDATES=(
-    "/Applications/PaperCut Print Deploy Client/Uninstall.command"
-    "/Applications/PaperCut Print Deploy/uninstall.command"
-)
+# Uninstall script location
+UNINSTALL_SCRIPT="/Applications/PaperCut Print Deploy Client/Uninstall.command"
 
-# Print Deploy bundle/domain identifiers used to locate preference files
-PAPERCUT_BUNDLE_IDS=(
-    "com.papercut.printdeploy"
-    "com.papercut.directprint"
-)
+# Print Deploy bundle identifier
+PAPERCUT_BUNDLE_ID="com.papercut.printdeploy"
 
 # System-level preference directories to scan
 SYSTEM_PREF_DIRS=(
@@ -62,29 +55,22 @@ remove_path() {
 
 log "=== Step 1: Uninstalling PaperCut Print Deploy Client ==="
 
-UNINSTALL_RAN=false
-for script in "${UNINSTALL_CANDIDATES[@]}"; do
-    if [ -f "$script" ]; then
-        log "Found uninstall script: $script"
-        chmod +x "$script"
-        bash "$script" -y &>/dev/null
-        exit_code=$?
-        if [ $exit_code -eq 0 ]; then
-            log "Uninstall script completed successfully."
-        else
-            log "WARNING: Uninstall script exited with code $exit_code — continuing with manual cleanup."
-        fi
-        UNINSTALL_RAN=true
-        break
+if [ -f "$UNINSTALL_SCRIPT" ]; then
+    log "Found uninstall script: $UNINSTALL_SCRIPT"
+    chmod +x "$UNINSTALL_SCRIPT"
+    bash "$UNINSTALL_SCRIPT" -y &>/dev/null
+    exit_code=$?
+    if [ $exit_code -eq 0 ]; then
+        log "Uninstall script completed successfully."
+    else
+        log "WARNING: Uninstall script exited with code $exit_code — continuing with manual cleanup."
     fi
-done
-
-if [ "$UNINSTALL_RAN" = false ]; then
+else
     log "No uninstall script found — proceeding with manual removal only."
 fi
 
 # Stop any running Print Deploy processes
-for proc in "pc-print-deploy-client" "PaperCut Print Deploy" "direct-print-monitor"; do
+for proc in "pc-print-deploy-client" "PaperCut Print Deploy"; do
     if pgrep -f "$proc" &>/dev/null; then
         log "Stopping process: $proc"
         pkill -f "$proc" 2>/dev/null
@@ -93,37 +79,28 @@ for proc in "pc-print-deploy-client" "PaperCut Print Deploy" "direct-print-monit
     fi
 done
 
-# Remove application bundles and install folders
-for app_path in "$PRINT_DEPLOY_APP" "$PRINT_DEPLOY_FOLDER"; do
-    remove_path "$app_path"
-done
+# Remove application folder (includes direct-print-monitor subfolder)
+remove_path "$PRINT_DEPLOY_APP"
 
-# Unload and remove system-level LaunchDaemons and LaunchAgents
-for launch_dir in /Library/LaunchDaemons /Library/LaunchAgents; do
-    for plist in "$launch_dir"/com.papercut.printdeploy.* "$launch_dir"/com.papercut.directprint.*; do
-        [ -f "$plist" ] || continue
-        label=$(defaults read "$plist" Label 2>/dev/null)
-        if [ -n "$label" ]; then
-            launchctl bootout system/"$label" 2>/dev/null
-            launchctl remove "$label" 2>/dev/null
-        fi
-        remove_path "$plist"
-    done
-done
+# Unload and remove the known LaunchAgent
+LAUNCH_AGENT_SYSTEM="/Library/LaunchAgents/com.papercut.printdeploy.client.plist"
+if [ -f "$LAUNCH_AGENT_SYSTEM" ]; then
+    label=$(defaults read "$LAUNCH_AGENT_SYSTEM" Label 2>/dev/null)
+    [ -n "$label" ] && launchctl bootout system/"$label" 2>/dev/null
+    [ -n "$label" ] && launchctl remove "$label" 2>/dev/null
+    remove_path "$LAUNCH_AGENT_SYSTEM"
+fi
 
 # Unload and remove per-user LaunchAgents
 while IFS= read -r user_home; do
-    la_dir="$user_home/Library/LaunchAgents"
-    [ -d "$la_dir" ] || continue
-    for plist in "$la_dir"/com.papercut.printdeploy.* "$la_dir"/com.papercut.directprint.*; do
-        [ -f "$plist" ] || continue
-        uid=$(stat -f "%u" "$user_home" 2>/dev/null)
-        label=$(defaults read "$plist" Label 2>/dev/null)
-        if [ -n "$label" ] && [ -n "$uid" ]; then
-            launchctl bootout gui/"$uid"/"$label" 2>/dev/null
-        fi
-        remove_path "$plist"
-    done
+    plist="$user_home/Library/LaunchAgents/com.papercut.printdeploy.client.plist"
+    [ -f "$plist" ] || continue
+    uid=$(stat -f "%u" "$user_home" 2>/dev/null)
+    label=$(defaults read "$plist" Label 2>/dev/null)
+    if [ -n "$label" ] && [ -n "$uid" ]; then
+        launchctl bootout gui/"$uid"/"$label" 2>/dev/null
+    fi
+    remove_path "$plist"
 done < <(find /Users -maxdepth 1 -mindepth 1 -type d ! -name "Shared" ! -name ".localized" 2>/dev/null)
 
 ###############################################################################
@@ -150,24 +127,20 @@ done < <(lpstat -p 2>/dev/null | awk '/^printer/ {print $2}')
 
 log "=== Step 3: Removing PaperCut Print Deploy preference files ==="
 
-# Build an extended regex pattern from bundle IDs for grep matching
-PREF_PATTERN=$(IFS="|"; echo "${PAPERCUT_BUNDLE_IDS[*]}")
-
 # -- System-level and Managed Preferences --
 for pref_dir in "${SYSTEM_PREF_DIRS[@]}"; do
     [ -d "$pref_dir" ] || continue
 
-    # Top-level plists directly in the directory
+    # Top-level plists
     while IFS= read -r plist; do
         remove_path "$plist"
-    done < <(find "$pref_dir" -maxdepth 1 -type f -name "*.plist" 2>/dev/null | grep -E "$PREF_PATTERN")
+    done < <(find "$pref_dir" -maxdepth 1 -type f -name "${PAPERCUT_BUNDLE_ID}*.plist" 2>/dev/null)
 
     # Subdirectories — e.g. /Library/Managed Preferences/<username>/
-    # These contain per-user managed plists pushed via MDM profiles
     while IFS= read -r subdir; do
         while IFS= read -r plist; do
             remove_path "$plist"
-        done < <(find "$subdir" -maxdepth 1 -type f -name "*.plist" 2>/dev/null | grep -E "$PREF_PATTERN")
+        done < <(find "$subdir" -maxdepth 1 -type f -name "${PAPERCUT_BUNDLE_ID}*.plist" 2>/dev/null)
     done < <(find "$pref_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
 done
 
@@ -180,10 +153,10 @@ while IFS= read -r user_home; do
     if [ -d "$pref_dir" ]; then
         while IFS= read -r plist; do
             remove_path "$plist"
-        done < <(find "$pref_dir" -maxdepth 1 -type f -name "*.plist" 2>/dev/null | grep -E "$PREF_PATTERN")
+        done < <(find "$pref_dir" -maxdepth 1 -type f -name "${PAPERCUT_BUNDLE_ID}*.plist" 2>/dev/null)
     fi
 
-    # Named folders that belong entirely to Print Deploy — remove whole directory
+    # Named folders that belong entirely to Print Deploy
     for named_dir in \
         "$user_home/Library/Application Support/PaperCut Print Deploy" \
         "$user_home/Library/Application Support/PaperCut Print Deploy Client" \
@@ -192,7 +165,6 @@ while IFS= read -r user_home; do
     do
         remove_path "$named_dir"
     done
-
     log "  Cleaned preferences for user: $username"
 done < <(find /Users -maxdepth 1 -mindepth 1 -type d ! -name "Shared" ! -name ".localized" 2>/dev/null)
 
@@ -204,14 +176,6 @@ killall cfprefsd 2>/dev/null || true
 ###############################################################################
 
 log "=== Step 4: Removing additional Print Deploy artifacts ==="
-
-for artifact in \
-    "/Library/Application Support/PaperCut Print Deploy" \
-    "/private/tmp/papercut-printdeploy" \
-    "/var/log/papercut-printdeploy.log"
-do
-    remove_path "$artifact"
-done
 
 # Remove package receipts so macOS doesn't block reinstalling older versions
 for receipt in /private/var/db/receipts/com.papercut.printdeploy.client.*; do
