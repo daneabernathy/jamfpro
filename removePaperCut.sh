@@ -11,8 +11,6 @@
 
 # prefixes of printer names deployed by PaperCut Print Deploy.
 # Add or remove entries to match your environment.
-PRINTER_PREFIXES=(
-#!/bin/bash
 
 PRINTER_PREFIXES=(
     "alumni"
