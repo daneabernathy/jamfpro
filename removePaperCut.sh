@@ -119,7 +119,7 @@ while IFS= read -r printer; do
             break
         fi
     done
-done < <(lpstat -p 2>/dev/null | awk '/^printer/ {print $2}')
+done < <(awk '/^<Printer /{print $2}' /etc/cups/printers.conf 2>/dev/null | tr -d '>')
 
 ###############################################################################
 # 3. REMOVE PREFERENCE FILES (SYSTEM, MANAGED, AND PER-USER)
