@@ -1,7 +1,7 @@
 #!/bin/bash
 # PaperCut Print Deploy - Full Removal Script
 # Deploy via Jamf Pro. Removes the Print Deploy client, all deployed printers
-# matching known suffixes, and all PaperCut Print Deploy-related preference files.
+# matching known prefixes, and all PaperCut Print Deploy-related preference files.
 # Intended for use during a PaperCut server migration.
 # Note: PCClient (Mobility Print) is handled by a separate script.
 
@@ -9,7 +9,7 @@
 # CONFIGURATION
 ###############################################################################
 
-# Suffixes of printer names deployed by PaperCut Print Deploy.
+# prefixes of printer names deployed by PaperCut Print Deploy.
 # Add or remove entries to match your environment.
 PRINTER_PREFIXES=(
     "Juckett"
@@ -99,7 +99,7 @@ while IFS= read -r user_home; do
 done < <(find /Users -maxdepth 1 -mindepth 1 -type d ! -name "Shared" ! -name ".localized" 2>/dev/null)
 
 ###############################################################################
-# 2. REMOVE PRINTERS MATCHING SUFFIX LIST
+# 2. REMOVE PRINTERS MATCHING prefix LIST
 ###############################################################################
 
 log "=== Step 2: Removing PaperCut-deployed printers ==="
@@ -116,8 +116,8 @@ else
     for printer in "${ALL_PRINTERS[@]}"; do
         printer_lower=$(echo "$printer" | tr '[:upper:]' '[:lower:]')
         matched=false
-        for suffix in "${PRINTER_PREFIXES[@]}"; do
-            prefix_lower=$(echo "$suffix" | tr '[:upper:]' '[:lower:]')
+        for prefix in "${PRINTER_PREFIXES[@]}"; do
+            prefix_lower=$(echo "$prefix" | tr '[:upper:]' '[:lower:]')
             if [[ "$printer_lower" == "$prefix_lower"* ]]; then
                 matched=true
                 log "Removing printer: $printer"
@@ -130,7 +130,7 @@ else
             fi
         done
         if [ "$matched" = false ]; then
-            log "  Skipping (no matching suffix): $printer"
+            log "  Skipping (no matching prefix): $printer"
         fi
     done
 fi
