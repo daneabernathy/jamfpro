@@ -12,9 +12,12 @@
 # Suffixes of printer names deployed by PaperCut Print Deploy.
 # Add or remove entries to match your environment.
 PRINTER_SUFFIXES=(
-    "Juckett"
-    "Partridge"
-    "Secure"
+    "-papercut"
+    "_papercut"
+    "-printdeploy"
+    "_printdeploy"
+    "-pcd"
+    "_pcd"
 )
 
 # Known PaperCut Print Deploy app location
@@ -106,17 +109,36 @@ done < <(find /Users -maxdepth 1 -mindepth 1 -type d ! -name "Shared" ! -name ".
 
 log "=== Step 2: Removing PaperCut-deployed printers ==="
 
-while IFS= read -r printer; do
-    printer_lower=$(echo "$printer" | tr '[:upper:]' '[:lower:]')
-    for suffix in "${PRINTER_SUFFIXES[@]}"; do
-        suffix_lower=$(echo "$suffix" | tr '[:upper:]' '[:lower:]')
-        if [[ "$printer_lower" == *"$suffix_lower" ]]; then
-            log "Removing printer: $printer"
-            lpadmin -x "$printer" && log "  Done." || log "  WARNING: lpadmin failed for $printer"
-            break
+ALL_PRINTERS=()
+while IFS= read -r line; do
+    ALL_PRINTERS+=("$line")
+done < <(lpstat -a 2>/dev/null | awk '{print $1}')
+
+if [ ${#ALL_PRINTERS[@]} -eq 0 ]; then
+    log "No printers found via lpstat"
+else
+    log "Found ${#ALL_PRINTERS[@]} printer(s): ${ALL_PRINTERS[*]}"
+    for printer in "${ALL_PRINTERS[@]}"; do
+        printer_lower=$(echo "$printer" | tr '[:upper:]' '[:lower:]')
+        matched=false
+        for suffix in "${PRINTER_SUFFIXES[@]}"; do
+            suffix_lower=$(echo "$suffix" | tr '[:upper:]' '[:lower:]')
+            if [[ "$printer_lower" == *"$suffix_lower" ]]; then
+                matched=true
+                log "Removing printer: $printer"
+                if lpadmin -x "$printer" 2>/dev/null; then
+                    log "  Successfully removed: $printer"
+                else
+                    log "  WARNING: lpadmin failed to remove: $printer (exit code $?)"
+                fi
+                break
+            fi
+        done
+        if [ "$matched" = false ]; then
+            log "  Skipping (no matching suffix): $printer"
         fi
     done
-done < <(awk '/^<Printer /{print $2}' /etc/cups/printers.conf 2>/dev/null | tr -d '>')
+fi
 
 ###############################################################################
 # 3. REMOVE PREFERENCE FILES (SYSTEM, MANAGED, AND PER-USER)
@@ -157,11 +179,12 @@ while IFS= read -r user_home; do
     for named_dir in \
         "$user_home/Library/Application Support/PaperCut Print Deploy" \
         "$user_home/Library/Application Support/PaperCut Print Deploy Client" \
-        "$user_home/Library/Application Preferences/PapercutPrintDeployClient" \
+        "$user_home/Library/Application Support/PapercutPrintDeployClient" \
         "$user_home/Library/Caches/com.papercut.printdeploy"
     do
         remove_path "$named_dir"
     done
+
     log "  Cleaned preferences for user: $username"
 done < <(find /Users -maxdepth 1 -mindepth 1 -type d ! -name "Shared" ! -name ".localized" 2>/dev/null)
 
