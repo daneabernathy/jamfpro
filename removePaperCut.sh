@@ -11,13 +11,8 @@
 
 # Suffixes of printer names deployed by PaperCut Print Deploy.
 # Add or remove entries to match your environment.
-PRINTER_SUFFIXES=(
-    "-papercut"
-    "_papercut"
-    "-printdeploy"
-    "_printdeploy"
-    "-pcd"
-    "_pcd"
+PRINTER_PREFIXES=(
+    "Juckett"
 )
 
 # Known PaperCut Print Deploy app location
@@ -121,9 +116,9 @@ else
     for printer in "${ALL_PRINTERS[@]}"; do
         printer_lower=$(echo "$printer" | tr '[:upper:]' '[:lower:]')
         matched=false
-        for suffix in "${PRINTER_SUFFIXES[@]}"; do
-            suffix_lower=$(echo "$suffix" | tr '[:upper:]' '[:lower:]')
-            if [[ "$printer_lower" == *"$suffix_lower" ]]; then
+        for suffix in "${PRINTER_PREFIXES[@]}"; do
+            prefix_lower=$(echo "$suffix" | tr '[:upper:]' '[:lower:]')
+            if [[ "$printer_lower" == "$prefix_lower"* ]]; then
                 matched=true
                 log "Removing printer: $printer"
                 if lpadmin -x "$printer" 2>/dev/null; then
