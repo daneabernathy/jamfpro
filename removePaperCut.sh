@@ -1,8 +1,9 @@
 #!/bin/bash
 # PaperCut Print Deploy - Full Removal Script
 # Deploy via Jamf Pro. Removes the Print Deploy client, all deployed printers
-# matching known suffixes, and all PaperCut-related preference files system-wide.
+# matching known suffixes, and all PaperCut Print Deploy-related preference files.
 # Intended for use during a PaperCut server migration.
+# Note: PCClient (Mobility Print) is handled by a separate script.
 
 ###############################################################################
 # CONFIGURATION
@@ -20,24 +21,19 @@ PRINTER_SUFFIXES=(
 )
 
 # Known PaperCut Print Deploy app locations
-PRINT_DEPLOY_APP="/Applications/PCClient.app"
-PRINT_DEPLOY_ALT="/Applications/PaperCut Print Deploy Client.app"
+PRINT_DEPLOY_APP="/Applications/PaperCut Print Deploy Client"
 PRINT_DEPLOY_FOLDER="/Applications/PaperCut Print Deploy"
 
 # Uninstall script candidates (tries each in order, stops at first found)
 UNINSTALL_CANDIDATES=(
+    "/Applications/PaperCut Print Deploy Client/Uninstall.command"
     "/Applications/PaperCut Print Deploy/uninstall.command"
-    "/Applications/PCClient.app/Contents/Resources/uninstall.command"
-    "/Applications/PaperCut Print Deploy Client.app/Contents/Resources/uninstall.command"
 )
 
-# PaperCut bundle/domain identifiers used to locate preference files
+# Print Deploy bundle/domain identifiers used to locate preference files
 PAPERCUT_BUNDLE_IDS=(
     "com.papercut.printdeploy"
-    "com.papercut.client"
-    "com.papercut.PCClient"
-    "net.papercut"
-    "com.papercut"
+    "com.papercut.directprint"
 )
 
 # System-level preference directories to scan
@@ -71,7 +67,7 @@ for script in "${UNINSTALL_CANDIDATES[@]}"; do
     if [ -f "$script" ]; then
         log "Found uninstall script: $script"
         chmod +x "$script"
-        bash "$script" &>/dev/null
+        bash "$script" -y &>/dev/null
         exit_code=$?
         if [ $exit_code -eq 0 ]; then
             log "Uninstall script completed successfully."
@@ -87,8 +83,8 @@ if [ "$UNINSTALL_RAN" = false ]; then
     log "No uninstall script found — proceeding with manual removal only."
 fi
 
-# Stop any running PaperCut processes
-for proc in "PCClient" "PaperCut Print Deploy" "pc-client" "papercut-client"; do
+# Stop any running Print Deploy processes
+for proc in "pc-print-deploy-client" "PaperCut Print Deploy" "direct-print-monitor"; do
     if pgrep -f "$proc" &>/dev/null; then
         log "Stopping process: $proc"
         pkill -f "$proc" 2>/dev/null
@@ -98,13 +94,13 @@ for proc in "PCClient" "PaperCut Print Deploy" "pc-client" "papercut-client"; do
 done
 
 # Remove application bundles and install folders
-for app_path in "$PRINT_DEPLOY_APP" "$PRINT_DEPLOY_ALT" "$PRINT_DEPLOY_FOLDER"; do
+for app_path in "$PRINT_DEPLOY_APP" "$PRINT_DEPLOY_FOLDER"; do
     remove_path "$app_path"
 done
 
 # Unload and remove system-level LaunchDaemons and LaunchAgents
 for launch_dir in /Library/LaunchDaemons /Library/LaunchAgents; do
-    for plist in "$launch_dir"/com.papercut.* "$launch_dir"/net.papercut.*; do
+    for plist in "$launch_dir"/com.papercut.printdeploy.* "$launch_dir"/com.papercut.directprint.*; do
         [ -f "$plist" ] || continue
         label=$(defaults read "$plist" Label 2>/dev/null)
         if [ -n "$label" ]; then
@@ -119,7 +115,7 @@ done
 while IFS= read -r user_home; do
     la_dir="$user_home/Library/LaunchAgents"
     [ -d "$la_dir" ] || continue
-    for plist in "$la_dir"/com.papercut.* "$la_dir"/net.papercut.*; do
+    for plist in "$la_dir"/com.papercut.printdeploy.* "$la_dir"/com.papercut.directprint.*; do
         [ -f "$plist" ] || continue
         uid=$(stat -f "%u" "$user_home" 2>/dev/null)
         label=$(defaults read "$plist" Label 2>/dev/null)
@@ -152,7 +148,7 @@ done < <(lpstat -p 2>/dev/null | awk '/^printer/ {print $2}')
 # 3. REMOVE PREFERENCE FILES (SYSTEM, MANAGED, AND PER-USER)
 ###############################################################################
 
-log "=== Step 3: Removing PaperCut preference files ==="
+log "=== Step 3: Removing PaperCut Print Deploy preference files ==="
 
 # Build an extended regex pattern from bundle IDs for grep matching
 PREF_PATTERN=$(IFS="|"; echo "${PAPERCUT_BUNDLE_IDS[*]}")
@@ -187,14 +183,12 @@ while IFS= read -r user_home; do
         done < <(find "$pref_dir" -maxdepth 1 -type f -name "*.plist" 2>/dev/null | grep -E "$PREF_PATTERN")
     fi
 
-    # Named folders that belong entirely to PaperCut — remove whole directory
+    # Named folders that belong entirely to Print Deploy — remove whole directory
     for named_dir in \
-        "$user_home/Library/Application Support/PaperCut" \
-        "$user_home/Library/Application Support/PCClient" \
         "$user_home/Library/Application Support/PaperCut Print Deploy" \
-        "$user_home/Library/Caches/com.papercut.printdeploy" \
-        "$user_home/Library/Caches/com.papercut.client" \
-        "$user_home/Library/Caches/PCClient"
+        "$user_home/Library/Application Support/PaperCut Print Deploy Client" \
+        "$user_home/Library/Application Preferences/PapercutPrintDeployClient" \
+        "$user_home/Library/Caches/com.papercut.printdeploy"
     do
         remove_path "$named_dir"
     done
@@ -209,16 +203,19 @@ killall cfprefsd 2>/dev/null || true
 # 4. REMOVE ADDITIONAL SYSTEM ARTIFACTS
 ###############################################################################
 
-log "=== Step 4: Removing additional PaperCut artifacts ==="
+log "=== Step 4: Removing additional Print Deploy artifacts ==="
 
 for artifact in \
-    "/Library/Application Support/PaperCut" \
-    "/Library/Application Support/PCClient" \
-    "/private/tmp/papercut" \
-    "/private/tmp/PCClient" \
-    "/var/log/papercut-client.log"
+    "/Library/Application Support/PaperCut Print Deploy" \
+    "/private/tmp/papercut-printdeploy" \
+    "/var/log/papercut-printdeploy.log"
 do
     remove_path "$artifact"
+done
+
+# Remove package receipts so macOS doesn't block reinstalling older versions
+for receipt in /private/var/db/receipts/com.papercut.printdeploy.client.*; do
+    remove_path "$receipt"
 done
 
 ###############################################################################
@@ -228,4 +225,3 @@ done
 log "=== PaperCut Print Deploy removal complete. ==="
 log "The device is ready to receive the new Print Deploy installer."
 exit 0
-`
