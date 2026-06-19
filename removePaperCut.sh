@@ -12,12 +12,9 @@
 # Suffixes of printer names deployed by PaperCut Print Deploy.
 # Add or remove entries to match your environment.
 PRINTER_SUFFIXES=(
-    "-papercut"
-    "_papercut"
-    "-printdeploy"
-    "_printdeploy"
-    "-pcd"
-    "_pcd"
+    "Juckett"
+    "Partridge"
+    "Secure"
 )
 
 # Known PaperCut Print Deploy app location
